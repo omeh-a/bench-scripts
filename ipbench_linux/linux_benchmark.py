@@ -13,6 +13,7 @@ Example:
 import argparse
 import csv
 import datetime as dt
+import os
 import re
 import socket
 import subprocess
@@ -226,13 +227,16 @@ if __name__ == "__main__":
     args = parse_args()
     packet_sizes = args.packet_sizes or [DEFAULT_PACKET_SIZES[args.protocol]]
 
-    # "x" so an existing results file is never silently overwritten.
-    debug_log = open(f"{args.logfile}.debug.log", "x") if args.debug else None
+    debug_log = open(f"{args.logfile}.debug.log", "w") if args.debug else None
+    abort_clients(args.clients)
+
+    # In case something breaks
+    nuke_logfile = False
+    err = None
     with open(args.logfile, "x", newline="") as out:
         writer = csv.writer(out, lineterminator="\n")
         n_cpus = None
 
-        abort_clients(args.clients)
         try:
             for throughput in args.throughputs:
                 for packet_size in packet_sizes:
@@ -248,5 +252,14 @@ if __name__ == "__main__":
                     # Flush per row so a crash or Ctrl-C mid-sweep keeps completed results.
                     out.flush()
                     print(",".join(row))
+        except Exception as e:
+            # Remember exception and delete log file later if crashed
+            err = e
         finally:
             abort_clients(args.clients)
+    if err is not None:
+        # This truly makes me sad, however it's completely necessary. Ipbench manages to screw
+        # up so often that it drives me insane having to manually delete the incomplete test!
+        print(f"Deleting {args.logfile} due to error...")
+        os.remove(args.logfile)
+        raise err
